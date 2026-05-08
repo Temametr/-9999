@@ -1,19 +1,32 @@
 export default class Racing {
     constructor(engine) {
         this.Engine = engine;
-        // Библиотека препятствий
+        // Библиотека всех возможных препятствий на дороге
         this.shapes = {
-            car: {
+            car: { // Обычная машина (ширина 3)
                 w: 3, h: 4,
                 pattern: [[0,1,0], [1,1,1], [0,1,0], [1,0,1]]
             },
-            truck: { // Длинный грузовик
+            truck: { // Длинный грузовик (ширина 3)
                 w: 3, h: 5,
                 pattern: [[0,1,0], [1,1,1], [1,0,1], [1,1,1], [1,0,1]]
             },
-            barrier: { // Бетонный блок
+            barrier: { // Обычный бетонный блок (ширина 3)
                 w: 3, h: 2,
                 pattern: [[1,1,1], [1,1,1]]
+            },
+            wide_barrier: { // ШИРОКИЙ блок (ширина 5) - нужно объезжать!
+                w: 5, h: 2,
+                pattern: [[1,1,1,1,1], [1,1,1,1,1]]
+            },
+            wide_truck: { // ШИРОКИЙ грузовик (ширина 5)
+                w: 5, h: 4,
+                pattern: [
+                    [0,1,1,1,0], 
+                    [1,1,1,1,1], 
+                    [1,0,1,0,1], 
+                    [1,1,1,1,1]
+                ]
             }
         };
     }
@@ -34,8 +47,8 @@ export default class Racing {
 
     drawShape(x, y, shapeId) {
         const shape = this.shapes[shapeId];
-        for(let r=0; r<shape.h; r++) {
-            for(let c=0; c<shape.w; c++) {
+        for(let r=0; r < shape.h; r++) {
+            for(let c=0; c < shape.w; c++) {
                 if(shape.pattern[r][c] && y+r >= 0 && y+r < this.Engine.ROWS) {
                     this.Engine.drawCell(this.Engine.ctx, x+c, y+r, true);
                 }
@@ -43,16 +56,15 @@ export default class Racing {
         }
     }
 
+    // Точная попиксельная проверка столкновений
     checkCollision() {
         let p = { x: this.player.x, y: this.player.y, w: 3, h: 4 };
         for(let e of this.enemies) {
             let shape = this.shapes[e.type];
             
-            // Грубая проверка
             if (p.x < e.x + shape.w && p.x + p.w > e.x &&
                 p.y < e.y + shape.h && p.y + p.h > e.y) {
                 
-                // Попиксельная проверка
                 for(let r = 0; r < shape.h; r++) {
                     for(let c = 0; c < shape.w; c++) {
                         if(shape.pattern[r][c]) {
@@ -83,13 +95,9 @@ export default class Racing {
             return;
         }
 
-        // ОРИГИНАЛЬНАЯ ЛОГИКА УСКОРЕНИЯ:
-        // Каждые 100 очков повышаем уровень (максимум до 10)
+        // Автоматическое ускорение каждые 100 очков
         this.level = Math.min(10, 1 + Math.floor(this.score / 100));
         this.Engine.setLines('УР.' + this.level);
-
-        // Чем выше уровень, тем меньше лимит тиков (выше скорость)
-        // На 1 уровне скорость = 12, на 10 уровне = 3 (очень быстро)
         let currentSpeed = Math.max(2, 13 - this.level);
 
         this.tick++;
@@ -99,27 +107,38 @@ export default class Racing {
 
             for(let e of this.enemies) e.y++; 
             
-            // Удаляем те, что уехали вниз, и даем очки
             if(this.enemies.length > 0 && this.enemies[0].y > 20) {
                 this.enemies.shift();
                 this.score += 10;
                 this.Engine.setScore(this.score);
             }
 
-            // Спавн новых препятствий с учетом дистанции
             let lastEnemy = this.enemies[this.enemies.length - 1];
-            // Дистанция зависит от скорости: чем быстрее игра, тем чуть больше окно для маневра
-            let safeDist = lastEnemy ? this.shapes[lastEnemy.type].h + 1 + Math.random() * (4 + this.level/2) : 0;
+            
+            // УМНАЯ ДИСТАНЦИЯ: Чем выше скорость, тем больше нужно места, 
+            // чтобы успеть 2-3 раза нажать кнопку для объезда широкого блока
+            let safeDist = lastEnemy ? this.shapes[lastEnemy.type].h + 3 + this.level + Math.random() * 2 : 0;
             
             if(!lastEnemy || lastEnemy.y > safeDist) {
                 if(Math.random() > 0.4) {
-                    let spawnX = Math.random() > 0.5 ? 1 : 6; 
-                    
                     let rand = Math.random();
                     let type = 'car';
-                    // Грузовики и блоки начинают появляться чаще на высоких уровнях
-                    if (rand > 0.90 - (this.level * 0.01)) type = 'truck';         
-                    else if (rand > 0.80 - (this.level * 0.01)) type = 'barrier';  
+                    
+                    // Шансы появления сложных препятствий растут с уровнем
+                    if (rand > 0.90 - (this.level * 0.01)) type = 'wide_truck';
+                    else if (rand > 0.80 - (this.level * 0.01)) type = 'wide_barrier';
+                    else if (rand > 0.65 - (this.level * 0.01)) type = 'truck';
+                    else if (rand > 0.50 - (this.level * 0.01)) type = 'barrier';
+
+                    let spawnX;
+                    if (type === 'wide_barrier' || type === 'wide_truck') {
+                        // Широкие объекты (ширина 5) оставляют свободным только 1 край
+                        spawnX = Math.random() > 0.5 ? 1 : 4; 
+                    } else {
+                        // Обычные объекты (ширина 3) могут спавниться вообще где угодно (от 1 до 6)
+                        const positions = [1, 2, 3, 4, 5, 6];
+                        spawnX = positions[Math.floor(Math.random() * positions.length)];
+                    }
 
                     this.enemies.push({ x: spawnX, y: -this.shapes[type].h, type: type });
                 }
@@ -134,7 +153,7 @@ export default class Racing {
         // --- ОТРИСОВКА ---
         this.Engine.ctx.clearRect(0, 0, 200, 400);
         
-        // Границы трассы
+        // Отрисовка движущихся границ
         for(let r=0; r < this.Engine.ROWS; r++) {
             for(let c=0; c < this.Engine.COLS; c++) {
                 let isWall = (c === 0 || c === 9);
@@ -144,6 +163,7 @@ export default class Racing {
             }
         }
 
+        // Отрисовка всех объектов на трассе
         for(let e of this.enemies) this.drawShape(e.x, e.y, e.type);
         this.drawShape(this.player.x, this.player.y, 'car');
     }
@@ -151,6 +171,7 @@ export default class Racing {
     onInputDown(btn) {
         if(this.gameOver) { if(btn === 'start') this.start(); return; }
         
+        // Машина игрока может перемещаться по координатам X от 1 до 6
         if(btn === 'left' && this.player.x > 1) { 
             this.player.x--; 
             this.Engine.vibrate('light'); 
@@ -161,6 +182,5 @@ export default class Racing {
         }
     }
 
-    // Для гонок отпускание кнопок теперь ничего не делает
     onInputUp(btn) {}
 }
