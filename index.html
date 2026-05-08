@@ -2,10 +2,8 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <!-- Отключаем масштабирование для мобильных устройств -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Ретро Тетрис TMA</title>
-    <!-- Подключаем Telegram Web App API -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
@@ -18,7 +16,7 @@
             height: 100vh;
             margin: 0;
             overflow: hidden;
-            touch-action: none; /* Блокируем свайпы страницы */
+            touch-action: none;
         }
 
         .console {
@@ -40,7 +38,7 @@
             border-left: 3px solid #333;
             border-bottom: 3px solid #777;
             border-right: 3px solid #777;
-            margin-bottom: 20px;
+            margin-bottom: 15px; /* Немного уменьшили отступ, чтобы влезла кнопка */
         }
 
         .screen {
@@ -49,6 +47,7 @@
             display: flex;
             padding: 8px;
             gap: 10px;
+            position: relative;
         }
 
         canvas { display: block; }
@@ -71,7 +70,33 @@
 
         .info-value { font-size: 18px; margin-top: 3px; }
 
-        /* Наэкранные кнопки */
+        /* Системные кнопки (Старт/Сброс) */
+        .system-buttons {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        .sys-btn {
+            background-color: #d12c2c;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 8px 20px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            font-size: 14px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.5), inset -2px -2px 5px rgba(0,0,0,0.3);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .sys-btn:active {
+            box-shadow: inset 2px 2px 5px rgba(0,0,0,0.5);
+            transform: scale(0.95);
+        }
+
         .controls-panel {
             display: flex;
             justify-content: space-between;
@@ -104,6 +129,7 @@
             font-size: 20px;
             cursor: pointer;
             user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
         
         .btn:active {
@@ -121,15 +147,6 @@
             height: 80px;
             font-size: 16px;
         }
-        
-        .game-over-text {
-            position: absolute;
-            color: #111;
-            font-weight: bold;
-            font-size: 20px;
-            text-align: center;
-            display: none;
-        }
 
     </style>
 </head>
@@ -138,7 +155,6 @@
     <div class="console">
         <div class="screen-bezel">
             <div class="screen">
-                <!-- Уменьшили размер ячейки для мобилок -->
                 <canvas id="gameCanvas" width="200" height="400"></canvas>
                 <div class="sidebar">
                     <div class="info-box">СЧЕТ<div class="info-value" id="score">0</div></div>
@@ -148,7 +164,11 @@
             </div>
         </div>
         
-        <!-- Панель управления -->
+        <!-- Добавленная кнопка старта -->
+        <div class="system-buttons">
+            <button class="sys-btn" id="btn-start">НОВАЯ ИГРА</button>
+        </div>
+        
         <div class="controls-panel">
             <div class="d-pad">
                 <button class="btn btn-up" id="btn-up">▲</button>
@@ -163,9 +183,8 @@
     </div>
 
     <script>
-        // Инициализация Telegram Web App
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Разворачиваем на всю высоту
+        tg.expand();
         tg.ready();
 
         const canvas = document.getElementById('gameCanvas');
@@ -173,7 +192,7 @@
         const nextCanvas = document.getElementById('nextCanvas');
         const nextCtx = nextCanvas.getContext('2d');
 
-        const CELL_SIZE = 20; // Уменьшенный размер клетки
+        const CELL_SIZE = 20;
         const COLS = 10;
         const ROWS = 20;
         const EMPTY_COLOR = '#8b956d';
@@ -195,6 +214,7 @@
         let score = 0;
         let linesCleared = 0;
         let gameOver = false;
+        let isStarted = false; // Флаг для отслеживания старта игры
         let animationFrameId;
 
         let tetromino = null;
@@ -288,7 +308,7 @@
                 score += lineScores[lines];
                 document.getElementById('score').innerText = score;
                 document.getElementById('lines').innerText = linesCleared;
-                tg.HapticFeedback.impactOccurred('heavy'); // Виброотклик при сжигании линии
+                tg.HapticFeedback.impactOccurred('heavy');
             }
 
             spawnTetromino();
@@ -302,6 +322,12 @@
             const row = type === 'I' ? -1 : 0;
 
             tetromino = { name: type, matrix: matrix, row: row, col: col };
+            
+            if (!isValidMove(tetromino.matrix, tetromino.row, tetromino.col)) {
+                showGameOver();
+                return;
+            }
+
             nextTetrominoType = getNextTetromino();
             drawNext();
         }
@@ -313,6 +339,8 @@
                     drawCell(nextCtx, c, r, false);
                 }
             }
+
+            if (!isStarted || gameOver) return;
 
             const matrix = tetrominoes[nextTetrominoType];
             const offsetCol = nextTetrominoType === 'O' ? 1 : (nextTetrominoType === 'I' ? 0 : 0.5);
@@ -327,33 +355,62 @@
             }
         }
 
+        // Отрисовка стартового экрана
+        function drawStartScreen() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    drawCell(ctx, col, row, false);
+                }
+            }
+            drawNext(); // Отрисует пустой стакан для следующей фигуры
+
+            ctx.fillStyle = 'rgba(139, 149, 109, 0.85)';
+            ctx.fillRect(0, canvas.height / 2 - 40, canvas.width, 80);
+            
+            ctx.fillStyle = SOLID_COLOR;
+            ctx.font = 'bold 20px "Courier New"';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('НАЖМИТЕ', canvas.width / 2, canvas.height / 2 - 15);
+            ctx.fillText('НОВАЯ ИГРА', canvas.width / 2, canvas.height / 2 + 15);
+        }
+
         function showGameOver() {
             gameOver = true;
             cancelAnimationFrame(animationFrameId);
+            
             ctx.fillStyle = 'rgba(139, 149, 109, 0.85)';
             ctx.fillRect(0, canvas.height / 2 - 30, canvas.width, 60);
+            
             ctx.fillStyle = SOLID_COLOR;
-            ctx.font = '20px "Courier New"';
+            ctx.font = 'bold 20px "Courier New"';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('ИГРА ОКОНЧЕНА', canvas.width / 2, canvas.height / 2);
-            tg.HapticFeedback.notificationOccurred('error'); // Виброотклик при проигрыше
+            
+            tg.HapticFeedback.notificationOccurred('error');
         }
 
         function restartGame() {
+            cancelAnimationFrame(animationFrameId); // Останавливаем предыдущий цикл, если был
             initPlayfield();
             score = 0;
             linesCleared = 0;
             document.getElementById('score').innerText = score;
             document.getElementById('lines').innerText = linesCleared;
             gameOver = false;
+            isStarted = true;
+            count = 0;
+            sequence = [];
+            nextTetrominoType = null;
             spawnTetromino();
             loop();
         }
 
         function loop() {
+            if (gameOver || !isStarted) return;
             animationFrameId = requestAnimationFrame(loop);
-            if (gameOver) return;
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -378,6 +435,7 @@
                     if (!isValidMove(tetromino.matrix, tetromino.row, tetromino.col)) {
                         tetromino.row--;
                         placeTetromino();
+                        if (gameOver) return;
                     }
                 }
 
@@ -391,30 +449,30 @@
             }
         }
 
-        // Управление кнопками
+        // Управление
         function moveLeft() {
-            if (gameOver) return;
+            if (gameOver || !isStarted) return;
             const col = tetromino.col - 1;
             if (isValidMove(tetromino.matrix, tetromino.row, col)) tetromino.col = col;
             tg.HapticFeedback.selectionChanged();
         }
 
         function moveRight() {
-            if (gameOver) return;
+            if (gameOver || !isStarted) return;
             const col = tetromino.col + 1;
             if (isValidMove(tetromino.matrix, tetromino.row, col)) tetromino.col = col;
             tg.HapticFeedback.selectionChanged();
         }
 
         function rotatePiece() {
-            if (gameOver) { restartGame(); return; }
+            if (gameOver || !isStarted) return;
             const matrix = rotate(tetromino.matrix);
             if (isValidMove(matrix, tetromino.row, tetromino.col)) tetromino.matrix = matrix;
             tg.HapticFeedback.selectionChanged();
         }
 
         function moveDown() {
-            if (gameOver) return;
+            if (gameOver || !isStarted) return;
             const row = tetromino.row + 1;
             if (!isValidMove(tetromino.matrix, row, tetromino.col)) {
                 tetromino.row = row - 1;
@@ -425,23 +483,29 @@
             tg.HapticFeedback.selectionChanged();
         }
 
-        // Обработчики кнопок
         const bindButton = (id, action) => {
             const btn = document.getElementById(id);
-            // Поддержка касаний для мобильных, клик для ПК
-            btn.addEventListener('touchstart', (e) => { e.preventDefault(); action(); });
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); action(); }, {passive: false});
             btn.addEventListener('mousedown', (e) => { e.preventDefault(); action(); });
         };
 
+        // Привязываем основное управление
         bindButton('btn-left', moveLeft);
         bindButton('btn-right', moveRight);
-        bindButton('btn-up', rotatePiece); // Вверх тоже вращает для удобства
+        bindButton('btn-up', rotatePiece); 
         bindButton('btn-down', moveDown);
         bindButton('btn-rotate', rotatePiece);
 
+        // Привязываем кнопку старта
+        bindButton('btn-start', () => {
+            restartGame();
+            tg.HapticFeedback.impactOccurred('medium');
+        });
+
+        // Отрисовываем экран ожидания при первой загрузке
         initPlayfield();
-        spawnTetromino();
-        animationFrameId = requestAnimationFrame(loop);
+        drawStartScreen();
+
     </script>
 </body>
 </html>
