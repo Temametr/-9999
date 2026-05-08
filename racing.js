@@ -1,44 +1,76 @@
 export default class Racing {
     constructor(engine) {
         this.Engine = engine;
-        this.carPattern = [
-            [0,1,0],
-            [1,1,1],
-            [0,1,0],
-            [1,0,1]
-        ];
+        // Библиотека шейпов (фигур)
+        this.shapes = {
+            car: {
+                w: 3, h: 4,
+                pattern: [[0,1,0], [1,1,1], [0,1,0], [1,0,1]]
+            },
+            truck: { // Большое препятствие
+                w: 3, h: 5,
+                pattern: [[0,1,0], [1,1,1], [1,0,1], [1,1,1], [1,0,1]]
+            },
+            barrier: { // Сплошной блок
+                w: 3, h: 2,
+                pattern: [[1,1,1], [1,1,1]]
+            }
+        };
     }
 
     start() {
         this.player = { x: 4, y: 15 };
         this.enemies = [];
-        this.speed = 15;
+        this.baseSpeed = 12; // Чем меньше число, тем быстрее игра
         this.tick = 0;
         this.score = 0;
         this.wallAnim = 0;
         this.gameOver = false;
+        this.isAccelerating = false; // Состояние педали газа
         
         this.Engine.setScore(0);
         this.Engine.setLines('RACE');
         this.Engine.clearNext();
     }
 
-    drawCar(x, y) {
-        for(let r=0; r<4; r++) {
-            for(let c=0; c<3; c++) {
-                if(this.carPattern[r][c] && y+r >= 0 && y+r < this.Engine.ROWS) {
+    // Универсальная отрисовка объектов
+    drawShape(x, y, shapeId) {
+        const shape = this.shapes[shapeId];
+        for(let r=0; r<shape.h; r++) {
+            for(let c=0; c<shape.w; c++) {
+                if(shape.pattern[r][c] && y+r >= 0 && y+r < this.Engine.ROWS) {
                     this.Engine.drawCell(this.Engine.ctx, x+c, y+r, true);
                 }
             }
         }
     }
 
+    // Попиксельная проверка столкновений
     checkCollision() {
+        let p = { x: this.player.x, y: this.player.y, w: 3, h: 4 };
         for(let e of this.enemies) {
-            // Упрощенная проверка столкновения прямоугольников
-            if (this.player.x < e.x + 3 && this.player.x + 3 > e.x &&
-                this.player.y < e.y + 4 && this.player.y + 4 > e.y) {
-                return true;
+            let shape = this.shapes[e.type];
+            
+            // Сначала грубая проверка (рядом ли они вообще)
+            if (p.x < e.x + shape.w && p.x + p.w > e.x &&
+                p.y < e.y + shape.h && p.y + p.h > e.y) {
+                
+                // Затем точная проверка по пикселям
+                for(let r = 0; r < shape.h; r++) {
+                    for(let c = 0; c < shape.w; c++) {
+                        if(shape.pattern[r][c]) {
+                            let absX = e.x + c;
+                            let absY = e.y + r;
+                            let pLocalX = absX - p.x;
+                            let pLocalY = absY - p.y;
+                            
+                            // Если пиксель препятствия накладывается на пиксель игрока
+                            if(pLocalX >= 0 && pLocalX < p.w && pLocalY >= 0 && pLocalY < p.h) {
+                                if(this.shapes.car.pattern[pLocalY][pLocalX]) return true;
+                            }
+                        }
+                    }
+                }
             }
         }
         return false;
@@ -55,63 +87,101 @@ export default class Racing {
             return;
         }
 
-        this.tick++;
-        if(this.tick > this.speed) {
-            this.tick = 0;
-            this.wallAnim = (this.wallAnim + 1) % 2;
+        // Логика "Турбо": если зажата кнопка, лимит тиков уменьшается в 3 раза
+        let currentSpeedLimit = this.isAccelerating ? Math.max(1, Math.floor(this.baseSpeed / 3)) : this.baseSpeed;
 
-            for(let e of this.enemies) e.y++; // Двигаем врагов
+        this.tick++;
+        if(this.tick >= currentSpeedLimit) {
+            this.tick = 0;
+            this.wallAnim = (this.wallAnim + 1) % 4; // Анимация обочины
+
+            for(let e of this.enemies) e.y++; // Двигаем препятствия вниз
             
-            // Удаляем проехавших и даем очки
+            // Удаляем те, что уехали вниз, и даем очки
             if(this.enemies.length > 0 && this.enemies[0].y > 20) {
                 this.enemies.shift();
-                this.score += 10;
+                // Бонус за рискованную езду: с зажатым газом дают больше очков
+                this.score += this.isAccelerating ? 20 : 10;
                 this.Engine.setScore(this.score);
-            }
-
-            // Спавним врагов
-            let lastEnemy = this.enemies[this.enemies.length - 1];
-            if(!lastEnemy || lastEnemy.y > 6) {
-                if(Math.random() > 0.5) {
-                    let spawnX = Math.random() > 0.5 ? 1 : 6; // Левая или правая полоса
-                    this.enemies.push({ x: spawnX, y: -4 });
+                
+                // Усложнение (игра сама по себе ускоряется со временем)
+                if (this.score % 200 === 0 && this.baseSpeed > 3) {
+                    this.baseSpeed -= 1;
                 }
             }
 
-            // Ускорение со временем
-            if(this.score > 0 && this.score % 100 === 0 && this.speed > 3) {
-                this.speed--; 
-                this.score += 10; // Смещаем чтобы не триггерить повторно
+            // Спавн новых препятствий
+            let lastEnemy = this.enemies[this.enemies.length - 1];
+            // Высчитываем безопасную дистанцию, чтобы игрок мог маневрировать
+            let safeDist = lastEnemy ? this.shapes[lastEnemy.type].h + 2 + Math.random() * 3 : 0;
+            
+            if(!lastEnemy || lastEnemy.y > safeDist) {
+                if(Math.random() > 0.4) {
+                    let spawnX = Math.random() > 0.5 ? 1 : 6; // Левая или правая полоса
+                    
+                    // Выбираем тип (с вероятностями)
+                    let rand = Math.random();
+                    let type = 'car';
+                    if (rand > 0.85) type = 'truck';         // 15% шанс на длинный грузовик
+                    else if (rand > 0.70) type = 'barrier';  // 15% шанс на блок
+
+                    this.enemies.push({ x: spawnX, y: -this.shapes[type].h, type: type });
+                }
             }
         }
 
+        // Проверяем ДТП
         if(this.checkCollision()) {
             this.gameOver = true;
             this.Engine.vibrateErr();
         }
 
-        // Отрисовка
-        this.Engine.ctx.clearRect(0,0, 200, 400);
+        // --- ОТРИСОВКА КАДРА ---
+        this.Engine.ctx.clearRect(0, 0, 200, 400);
         
-        // Рисуем границы трассы и пустой фон
-        for(let r=0; r<this.Engine.ROWS; r++) {
-            for(let c=0; c<this.Engine.COLS; c++) {
+        // Рисуем границы трассы (движущиеся прерывистые линии)
+        for(let r=0; r < this.Engine.ROWS; r++) {
+            for(let c=0; c < this.Engine.COLS; c++) {
                 let isWall = (c === 0 || c === 9);
                 let drawSolid = false;
-                if(isWall && (r + this.wallAnim) % 3 !== 0) drawSolid = true;
+                if(isWall && (r + this.wallAnim) % 4 < 2) drawSolid = true;
                 this.Engine.drawCell(this.Engine.ctx, c, r, drawSolid);
             }
         }
 
-        this.drawCar(this.player.x, this.player.y);
-        for(let e of this.enemies) this.drawCar(e.x, e.y);
+        // Рисуем врагов
+        for(let e of this.enemies) {
+            this.drawShape(e.x, e.y, e.type);
+        }
+        
+        // Рисуем игрока
+        this.drawShape(this.player.x, this.player.y, 'car');
     }
 
-    onInput(btn) {
+    // Вызывается при ЗАЖАТИИ кнопки
+    onInputDown(btn) {
         if(this.gameOver) { if(btn === 'start') this.start(); return; }
-        // Границы играбельной зоны: x=1 и x=6 (так как ширина машинки 3)
-        if(btn === 'left' && this.player.x > 1) { this.player.x--; this.Engine.vibrate('light'); }
-        if(btn === 'right' && this.player.x < 6) { this.player.x++; this.Engine.vibrate('light'); }
-        if(btn === 'up' || btn === 'action') this.tick += 5; // Газ / Турбо!
+        
+        if(btn === 'left' && this.player.x > 1) { 
+            this.player.x--; 
+            this.Engine.vibrate('light'); 
+        }
+        if(btn === 'right' && this.player.x < 6) { 
+            this.player.x++; 
+            this.Engine.vibrate('light'); 
+        }
+        
+        // Жмем педаль газа
+        if(btn === 'up' || btn === 'action') {
+            this.isAccelerating = true;
+        }
+    }
+
+    // Вызывается при ОТПУСКАНИИ кнопки
+    onInputUp(btn) {
+        // Отпускаем педаль газа
+        if(btn === 'up' || btn === 'action') {
+            this.isAccelerating = false;
+        }
     }
 }
