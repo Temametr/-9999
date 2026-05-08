@@ -100,15 +100,27 @@ function gameLoop() {
 }
 
 // Привязка управления
-const handleInput = (btn) => {
-    if(btn === 'menu') switchGame(MenuState);
-    else if(activeGame && activeGame.onInput) activeGame.onInput(btn);
+// --- ОБНОВЛЕННАЯ СИСТЕМА ВВОДА (ПОДДЕРЖКА ЗАЖАТИЯ КНОПОК) ---
+const handleInput = (btn, isDown) => {
+    if(btn === 'menu' && isDown) switchGame(MenuState);
+    else if(activeGame) {
+        if(isDown && activeGame.onInputDown) activeGame.onInputDown(btn);
+        else if(!isDown && activeGame.onInputUp) activeGame.onInputUp(btn);
+        // Fallback для меню и Тетриса (они работают по старому методу)
+        else if(isDown && activeGame.onInput) activeGame.onInput(btn); 
+    }
 };
 
 const bindBtn = (id, btn) => {
     const el = document.getElementById(id);
-    el.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(btn); }, {passive: false});
-    el.addEventListener('mousedown', (e) => { e.preventDefault(); handleInput(btn); });
+    // Срабатывает при касании
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(btn, true); }, {passive: false});
+    // Срабатывает при отпускании пальца
+    el.addEventListener('touchend', (e) => { e.preventDefault(); handleInput(btn, false); });
+    // Для ПК (мышка)
+    el.addEventListener('mousedown', (e) => { e.preventDefault(); handleInput(btn, true); });
+    el.addEventListener('mouseup', (e) => { e.preventDefault(); handleInput(btn, false); });
+    el.addEventListener('mouseleave', (e) => { e.preventDefault(); handleInput(btn, false); });
 };
 
 bindBtn('btn-up', 'up'); bindBtn('btn-down', 'down');
